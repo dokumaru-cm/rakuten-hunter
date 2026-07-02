@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(**)",
+      "Write(**)",
+      "Edit(**)",
+      "MultiEdit(**)",
+      "Bash(git:*)",
+      "Bash(npm:*)",
+      "WebFetch(*)",
+      "WebSearch"
+    ],
+    "ask": [
+      "Bash(rm *)",
+      "Bash(rm -rf *)",
+      "Bash(rmdir *)"
+    ],
+    "defaultMode": "acceptEdits"
+  }
+}

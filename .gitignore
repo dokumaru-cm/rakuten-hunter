@@ -1,0 +1,16 @@
+# Dependencies (nặng nhất — hàng trăm MB)
+node_modules/
+
+# Secrets
+.env
+
+# Generated at runtime (không commit)
+output/
+data/scraped/
+data/images/
+data/sent_deals.json
+
+# Misc
+*.log
+.DS_Store
+scratchpad/

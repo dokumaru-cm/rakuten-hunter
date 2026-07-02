@@ -1,0 +1,45 @@
+{
+  "scraping": {
+    "targets": {
+      "superdeal": "https://event.rakuten.co.jp/superdeal/",
+      "search_half": "https://search.rakuten.co.jp/search/mall/半額/",
+      "search_timesale": "https://search.rakuten.co.jp/search/mall/タイムセール/",
+      "ranking": "https://ranking.rakuten.co.jp/"
+    },
+    "genres": {
+      "gia_dung": { "id": "100804", "keywords": ["キッチン", "掃除", "収納"] },
+      "thuc_pham": { "id": "100227", "keywords": ["お菓子", "ドリンク", "米"] },
+      "my_pham": { "id": "100939", "keywords": ["スキンケア", "メイク"] },
+      "quan_ao_tre_em": { "id": "100533", "keywords": ["子供服", "ベビー服"] },
+      "do_choi_tre_em": { "id": "101164", "keywords": ["知育玩具", "ゲーム"] }
+    },
+    "keywords": ["半額", "タイムセール", "在庫処分", "アウトレット"],
+    "delays": { "minMs": 3000, "maxMs": 8000 },
+    "maxPagesPerTarget": 3,
+    "userAgents": [
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    ]
+  },
+  "scoring": {
+    "threshold": 70,
+    "hotDealThreshold": 85,
+    "maxDealsPerRun": 10,
+    "maxPerShop": 1
+  },
+  "content": {
+    "language": "vi",
+    "geminiModel": "gemini-2.0-flash",
+    "useAI": false,
+    "linkMode": "raw"
+  },
+  "image": {
+    "width": 1200,
+    "height": 628,
+    "mascotDir": "./assets/mascot/"
+  },
+  "output": {
+    "sink": "local",
+    "dir": "./output"
+  }
+}
