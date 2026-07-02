@@ -31,7 +31,8 @@
     "language": "vi",
     "geminiModel": "gemini-2.0-flash",
     "useAI": false,
-    "linkMode": "raw"
+    "linkMode": "raw",
+    "generateLimit": 30
   },
   "image": {
     "width": 1200,

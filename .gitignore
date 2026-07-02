@@ -5,7 +5,8 @@ node_modules/
 .env
 
 # Generated at runtime (không commit)
-output/
+# Chú ý: phải có "/" đầu — "output/" trần sẽ match cả src/output/ (code)!
+/output/
 data/scraped/
 data/images/
 data/sent_deals.json

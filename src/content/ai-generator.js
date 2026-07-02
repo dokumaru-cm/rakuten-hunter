@@ -14,7 +14,7 @@ const logger = require("../utils/logger");
  * linkMode "raw" (hiện tại): dùng thẳng deal.itemUrl.
  * (V2: "room" → chèn placeholder [ROOM_LINK] cho bạn dán link ROOM.)
  */
-async function generateContent(deal, cfg = null) {
+async function generateContent(deal, cfg = null, options = {}) {
   const config = cfg || loadConfig();
   const link = resolveLink(deal, config);
 
@@ -22,7 +22,7 @@ async function generateContent(deal, cfg = null) {
   let friendMessage;
   let via = "template";
 
-  if (config.content?.useAI && config.secrets?.geminiApiKey) {
+  if (config.content?.useAI && config.secrets?.geminiApiKey && !options.forceTemplate) {
     try {
       const ai = await generateWithGemini(deal, link, config);
       facebookPost = ai.facebookPost;

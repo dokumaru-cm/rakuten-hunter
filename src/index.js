@@ -1,27 +1,31 @@
 "use strict";
 
 /**
- * Rakuten Hunter — Orchestrator (Phase 4).
+ * Rakuten Hunter — Orchestrator (catalog mode).
  *
- * Nối toàn bộ pipeline thành 1 lệnh:
- *   scrape → score → dedup → filter → content(AI/template) → image → OutputSink
+ * Pipeline: scrape → score → (dedup chọn featured) → build catalog.
+ *   - HIỂN THỊ TẤT CẢ sản phẩm (không giới hạn 10) với đầy đủ thông tin sale/point,
+ *     search / filter / sort ngay trong output/index.html.
+ *   - Sinh ảnh promo mascot + bài Facebook/message cho `generateLimit` deal hot nhất
+ *     (tránh render hàng trăm ảnh). Deal còn lại dùng thumbnail Rakuten + info.
  *
  * Chạy:
- *   npm start                 # full pipeline, có dedup (bỏ deal đã gửi)
- *   npm run run:fresh         # bỏ qua dedup (demo/chạy lại) — không ghi registry
- *   node src/index.js --no-dedup --max 6 --sources superdeal
- *
- * Đầu ra hiện tại: LocalSink (output/index.html). Phase 5 chỉ đổi output.sink="telegram".
+ *   npm start                        # catalog đầy đủ, featured = deal mới (dedup)
+ *   npm run run:fresh                # không dedup (featured = top điểm, không ghi registry)
+ *   node src/index.js --gen 50       # sinh bài+ảnh cho 50 deal
+ *   node src/index.js --sources superdeal --keywords 半額,在庫処分
  */
 
 const { loadConfig } = require("./utils/config");
 const { scrapeAll } = require("./scraper");
-const { scoreDeals, filterDeals } = require("./analyzer/scorer");
+const { scoreDeals } = require("./analyzer/scorer");
 const { filterNew, markAsSent } = require("./analyzer/dedup");
 const { generateContent } = require("./content/ai-generator");
 const { createPromoImage, selectMascotPose } = require("./content/image-maker");
 const { createSink } = require("./output");
-const { sleep } = require("./utils/helpers");
+const { sleep, ensureDir, stampForFilename } = require("./utils/helpers");
+const fs = require("fs");
+const path = require("path");
 const logger = require("./utils/logger");
 
 function parseArgs(argv) {
@@ -29,7 +33,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--no-dedup") opts.dedup = false;
-    else if (a === "--max") opts.max = parseInt(argv[++i], 10);
+    else if (a === "--gen") opts.gen = parseInt(argv[++i], 10);
     else if (a === "--sources") opts.sources = argv[++i].split(",");
     else if (a === "--keywords") opts.keywords = argv[++i].split(",");
   }
@@ -37,72 +41,69 @@ function parseArgs(argv) {
 }
 
 async function runPipeline(config, opts = {}) {
-  const dedup = opts.dedup !== false;
-  const threshold = config.scoring.threshold;
-  const maxDeals = opts.max || config.scoring.maxDealsPerRun;
-
   // 1. Scrape
-  logger.info("🕷️  [1/5] Scrape...");
-  const products = await scrapeAll(config.scraping, {
-    sources: opts.sources,
-    keywords: opts.keywords,
-  });
+  logger.info("🕷️  [1/4] Scrape...");
+  const products = await scrapeAll(config.scraping, { sources: opts.sources, keywords: opts.keywords });
   if (products.length === 0) {
     logger.warn("Không scrape được sản phẩm nào. Dừng.");
     return;
   }
-
-  // 2. Score
-  logger.info("📊 [2/5] Chấm điểm...");
-  let scored = scoreDeals(products);
-
-  // 3. Dedup (bỏ deal đã gửi)
-  if (dedup) {
-    const before = scored.length;
-    scored = filterNew(scored);
-    logger.info(`🧹 [3/5] Dedup: ${before} → ${scored.length} (bỏ ${before - scored.length} deal đã gửi)`);
-  } else {
-    logger.info("🧹 [3/5] Dedup: BỎ QUA (--no-dedup)");
+  // Lưu snapshot để rebuild catalog sau này không cần scrape lại.
+  try {
+    const dir = ensureDir(path.join(config.paths.data, "scraped"));
+    fs.writeFileSync(path.join(dir, `${stampForFilename()}.json`), JSON.stringify(products, null, 2), "utf8");
+  } catch (e) {
+    logger.warn(`Không lưu được snapshot: ${e.message}`);
   }
+  return buildCatalog(config, products, opts);
+}
 
-  // 4. Filter theo ngưỡng + giới hạn + đa dạng shop
-  const maxPerShop = config.scoring.maxPerShop || 1;
-  const topDeals = filterDeals(scored, threshold, maxDeals, maxPerShop);
-  const shops = new Set(topDeals.map((d) => d.shopName)).size;
-  logger.info(`🎯 [4/5] Top deals: ${topDeals.length} (score ≥ ${threshold}, tối đa ${maxDeals}, ${shops} shop khác nhau)`);
-  if (topDeals.length === 0) {
-    logger.info("Không có deal mới đạt ngưỡng. Dừng.");
-    return;
-  }
+/** Dựng catalog từ danh sách sản phẩm đã có (dùng lại được khi rebuild không scrape). */
+async function buildCatalog(config, products, opts = {}) {
+  const dedup = opts.dedup !== false;
+  const genLimit = opts.gen || config.content.generateLimit || 30;
 
-  // 5. Content + Image → Sink
-  logger.info("✍️  [5/5] Sinh content + ảnh → output...");
+  // 2. Score toàn bộ
+  logger.info("📊 [2/4] Chấm điểm toàn bộ...");
+  const scored = scoreDeals(products); // đã sort điểm giảm dần
+
+  // 3. Chọn featured để sinh ẢNH promo (deal mới nếu bật dedup). Content thì sinh cho TẤT CẢ.
+  const pool = dedup ? filterNew(scored) : scored;
+  const featured = new Set(pool.slice(0, genLimit).map((d) => d.id));
+  logger.info(`✨ [3/4] Content: TẤT CẢ ${scored.length} · Ảnh promo: ${featured.size} deal hot${dedup ? " mới" : ""}`);
+
+  // 4. Build catalog: content cho tất cả, ảnh cho featured
+  logger.info("🖼️  [4/4] Dựng catalog (bài viết cho tất cả, ảnh mascot cho featured)...");
   const sink = createSink(config);
   await sink.init();
 
-  let ok = 0;
-  for (const deal of topDeals) {
+  let img = 0;
+  let done = 0;
+  for (const deal of scored) {
     try {
-      const content = await generateContent(deal, config);
-      const pose = selectMascotPose(deal);
+      const isFeatured = featured.has(deal.id);
+      // Content cho MỌI sản phẩm (non-featured ép template để không gọi AI hàng loạt).
+      const content = await generateContent(deal, config, { forceTemplate: !isFeatured });
       let image = null;
-      try {
-        image = await createPromoImage(deal, pose);
-      } catch (err) {
-        logger.error(`   Ảnh lỗi (${deal.itemName.slice(0, 24)}): ${err.message}`);
+      if (isFeatured) {
+        try {
+          image = await createPromoImage(deal, selectMascotPose(deal));
+        } catch (err) {
+          logger.error(`   Ảnh lỗi (${deal.itemName.slice(0, 22)}): ${err.message}`);
+        }
+        if (dedup) markAsSent(deal.id);
+        img++;
+        await sleep(120);
       }
       await sink.sendDeal(deal, content, image);
-      if (dedup) markAsSent(deal.id);
-      ok++;
-      logger.info(`   ✅ [${deal.score}] ${deal.genreName} — ${deal.itemName.slice(0, 34)} (via ${content.via})`);
-      await sleep(300);
+      if (++done % 200 === 0) logger.info(`   ...đã xử lý ${done}/${scored.length}`);
     } catch (err) {
-      logger.error(`   ❌ ${deal.itemName.slice(0, 30)} — ${err.message}`);
+      logger.error(`   ❌ ${(deal.itemName || "").slice(0, 30)} — ${err.message}`);
     }
   }
 
   const result = await sink.close();
-  logger.info(`🏁 Hoàn tất: ${ok}/${topDeals.length} deal. ${result ? "→ " + result : ""}`);
+  logger.info(`🏁 Catalog: ${scored.length} sản phẩm có bài viết, ${img} có ảnh promo. → ${result}`);
 }
 
 async function main() {
@@ -119,4 +120,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { runPipeline };
+module.exports = { runPipeline, buildCatalog };
