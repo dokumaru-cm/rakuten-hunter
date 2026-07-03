@@ -3,7 +3,7 @@
 const path = require("path");
 const { createCanvas, loadImage } = require("@napi-rs/canvas");
 const { loadConfig } = require("../utils/config");
-const { formatPrice, truncate } = require("../utils/helpers");
+const { formatPrice, truncate, pickBy } = require("../utils/helpers");
 const logger = require("../utils/logger");
 
 const WIDTH = 1200;
@@ -23,13 +23,95 @@ const CATEGORY_COLORS = {
   default: { from: "#FF5252", to: "#C62828" },
 };
 
-/** Chọn pose mascot theo đặc điểm deal. */
+/**
+ * Chọn pose mascot theo đặc điểm deal — CHỈ dùng biểu cảm vui tươi/tích cực
+ * (sad bị loại: biểu cảm tiêu cực trên banner sản phẩm dễ phản tác dụng).
+ * Deal thường được rải đều qua pool vui vẻ, ổn định theo id (rebuild không xáo trộn).
+ */
+const CHEERFUL_POOL = ["pointing", "happy", "cute", "hello", "normal", "byebye"];
+
 function selectMascotPose(deal) {
   if (deal.score >= 85) return "excited";
   if (deal.discountPercent >= 50) return "surprised";
   if (deal.pointRate >= 30) return "winking";
+  if (deal.genre === "my_pham") return "cute";
+  if (deal.genre === "do_choi_tre_em" || deal.genre === "quan_ao_tre_em") return "happy";
   if (deal.dealEndTime) return "inviting";
-  return "pointing";
+  return pickBy(deal.id, CHEERFUL_POOL);
+}
+
+/** Câu thoại ngắn (thuần Nhật/số — an toàn font) cho bong bóng cạnh mascot. */
+function bubbleText(deal) {
+  if (deal.discountPercent >= 50) return "半額!?";
+  if (deal.discountPercent >= 30) return `−${deal.discountPercent}%!`;
+  if (deal.pointRate >= 30) return `P+${deal.pointRate}%!`;
+  if (deal.score >= 85) return "スゴイ!";
+  return pickBy(deal.id, ["お得!", "イチオシ!", "チェック!", "オススメ!"]);
+}
+
+/** Rắc confetti (chấm tròn + sao nhỏ) lên nền — vị trí ổn định theo seed. */
+function drawConfetti(ctx, seed) {
+  let s = 0;
+  const str = String(seed || "x");
+  for (let i = 0; i < str.length; i++) s = (s * 31 + str.charCodeAt(i)) >>> 0;
+  const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+
+  for (let i = 0; i < 46; i++) {
+    const x = rnd() * WIDTH;
+    const y = rnd() * (HEIGHT - CTA_H);
+    const r = 2 + rnd() * 5;
+    ctx.globalAlpha = 0.10 + rnd() * 0.12;
+    ctx.fillStyle = ["#FFFFFF", "#FFEB3B", "#FFD180"][(s >>> 4) % 3];
+    if (rnd() < 0.75) {
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // sao 4 cánh nhỏ
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rnd() * Math.PI);
+      ctx.beginPath();
+      const R = r * 2.2, ri = r * 0.7;
+      for (let k = 0; k < 8; k++) {
+        const rad = k % 2 === 0 ? R : ri;
+        const a = (Math.PI / 4) * k;
+        ctx.lineTo(Math.cos(a) * rad, Math.sin(a) * rad);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+/** Bong bóng thoại trắng có đuôi chỉ về mascot, chữ navy đậm. */
+function drawSpeechBubble(ctx, text, cx, cy) {
+  ctx.font = `bold 26px ${FONT}`;
+  const tw = ctx.measureText(text).width;
+  const w = tw + 34, h = 48, r = h / 2;
+  const x = cx - w, y = cy - h / 2;
+
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.25)";
+  ctx.shadowBlur = 10;
+  ctx.fillStyle = "#FFFFFF";
+  roundRect(ctx, x, y, w, h, r);
+  ctx.fill();
+  // đuôi
+  ctx.beginPath();
+  ctx.moveTo(x + w - 6, cy - 7);
+  ctx.lineTo(x + w + 14, cy + 4);
+  ctx.lineTo(x + w - 12, cy + 9);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  ctx.fillStyle = "#1A2B4A";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, x + 17, cy + 1);
+  ctx.textBaseline = "alphabetic";
 }
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -84,6 +166,7 @@ async function createPromoImage(deal, pose = null) {
   g.addColorStop(1, colors.to);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  drawConfetti(ctx, deal.id);
 
   // 2. Ảnh sản phẩm trong vòng tròn trắng.
   const productImg = await fetchImage(deal.imageUrl);
@@ -106,9 +189,15 @@ async function createPromoImage(deal, pose = null) {
     ctx.restore();
   }
 
-  // 3. Nhãn nguồn (góc trên trái).
+  // 3. Nhãn nguồn (góc trên trái) — dán nghiêng kiểu sticker.
   const tag = deal.isSuperDeal ? "SUPER DEAL" : "SALE";
-  drawChip(ctx, 34, 30, tag, { bg: "rgba(255,255,255,0.95)", fg: colors.to, font: `bold 24px ${FONT}`, h: 42 });
+  ctx.save();
+  ctx.translate(34, 30);
+  ctx.rotate(-0.06);
+  ctx.shadowColor = "rgba(0,0,0,0.3)";
+  ctx.shadowBlur = 8;
+  drawChip(ctx, 0, 0, tag, { bg: "rgba(255,255,255,0.97)", fg: colors.to, font: `bold 24px ${FONT}`, h: 42 });
+  ctx.restore();
 
   // 4. Tên sản phẩm.
   ctx.fillStyle = "#FFFFFF";
@@ -166,14 +255,17 @@ async function createPromoImage(deal, pose = null) {
     ctx.fillText("期間限定 — お早めに!", TEXT_X, ry);
   }
 
-  // 8. Mascot (đứng trên thanh CTA, không bị cắt).
+  // 8. Mascot (đứng trên thanh CTA, không bị cắt) + bong bóng thoại.
   try {
     const cfg = loadConfig();
     const mascotImg = await loadImage(path.join(cfg.paths.mascot, `mascot_${mascotPose}.png`));
     const mh = 360;
     const mw = (mascotImg.width / mascotImg.height) * mh;
+    const mx = WIDTH - mw - 28;
     const my = HEIGHT - CTA_H - mh + 24; // chân đứng chạm mép trên thanh CTA
-    ctx.drawImage(mascotImg, WIDTH - mw - 28, my, mw, mh);
+    ctx.drawImage(mascotImg, mx, my, mw, mh);
+    // Bong bóng thoại phía trên-trái đầu mascot.
+    drawSpeechBubble(ctx, bubbleText(deal), mx + 8, my + 46);
   } catch (e) {
     logger.warn(`Không nạp được mascot "${mascotPose}": ${e.message}`);
   }

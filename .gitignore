@@ -10,6 +10,8 @@ node_modules/
 data/scraped/
 data/images/
 data/sent_deals.json
+data/gemini-usage.json
+data/content-cache.json
 
 # Misc
 *.log

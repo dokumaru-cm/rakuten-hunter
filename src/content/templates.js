@@ -1,6 +1,6 @@
 "use strict";
 
-const { formatPrice } = require("../utils/helpers");
+const { formatPrice, pickBy } = require("../utils/helpers");
 
 const HASHTAGS = ["#PR", "#楽天", "#お得", "#スーパーDEAL"];
 
@@ -38,19 +38,56 @@ function priceLine(deal) {
   return `${formatPrice(deal.currentPrice)}${deal.discountPercent ? ` (giảm ${deal.discountPercent}%)` : ""}`;
 }
 
-/** Câu "hook" tiếng Việt chọn theo điểm mạnh nhất của deal. */
+/** Câu "hook" tiếng Việt — nhiều biến thể, chọn ổn định theo deal cho đỡ lặp. */
 function hookLine(deal) {
-  if (deal.score >= 85) return "🔥 DEAL SIÊU HOT hôm nay, xịn hết nấc!";
-  if (deal.discountPercent >= 50) return `😱 Giảm sốc tới ${deal.discountPercent}% — hiếm khi thấy!`;
-  if (deal.pointRate >= 30) return `💰 Hoàn point khủng ${deal.pointRate}% — mua như được lời lại!`;
-  if (deal.dealEndTime) return "⏰ Deal có giới hạn thời gian, nhanh kẻo lỡ!";
-  return "✨ Deal ngon đáng chú ý cho cả nhà nè!";
+  if (deal.score >= 85) {
+    return pickBy(deal.id, [
+      "🔥 DEAL SIÊU HOT hôm nay, xịn hết nấc!",
+      "🔥 Deal đỉnh nhất hôm nay đây rồi, bỏ qua là tiếc!",
+      "🚨 Báo động deal xịn — hàng ngon giá hời thế này hiếm lắm!",
+    ]);
+  }
+  if (deal.discountPercent >= 50) {
+    return pickBy(deal.id, [
+      `😱 Giảm sốc tới ${deal.discountPercent}% — hiếm khi thấy!`,
+      `😱 Ối trời, giảm hẳn ${deal.discountPercent}% luôn cả nhà ơi!`,
+      `💥 Sale mạnh tay ${deal.discountPercent}% — canh mãi mới thấy!`,
+    ]);
+  }
+  if (deal.pointRate >= 30) {
+    return pickBy(deal.id, [
+      `💰 Hoàn point khủng ${deal.pointRate}% — mua như được lời lại!`,
+      `💰 Point back ${deal.pointRate}% — kiểu này mua là lãi rồi!`,
+      `🤑 Được hoàn hẳn ${deal.pointRate}% point, ngon hơn cả giảm giá!`,
+    ]);
+  }
+  if (deal.dealEndTime) {
+    return pickBy(deal.id, [
+      "⏰ Deal có giới hạn thời gian, nhanh kẻo lỡ!",
+      "⏰ Đồng hồ đếm ngược rồi — chần chừ là hết suất!",
+    ]);
+  }
+  return pickBy(deal.id, [
+    "✨ Deal ngon đáng chú ý cho cả nhà nè!",
+    "🛒 Lượm được deal hời, chia sẻ liền cho cả nhà!",
+    "✨ Món này đang giá tốt, ai cần thì vào ngay nhé!",
+    "🎁 Săn được món hời quá, không khoe không chịu được!",
+  ]);
 }
 
-/** Câu chốt kêu gọi. */
+/** Câu chốt kêu gọi — nhiều biến thể. */
 function closingLine(deal) {
-  if (deal.dealEndTime) return "Số lượng & thời gian có hạn, chốt nhanh nha 👇";
-  return "Thấy hời thì múc liền tay nha cả nhà 👇";
+  if (deal.dealEndTime) {
+    return pickBy(deal.id + "c", [
+      "Số lượng & thời gian có hạn, chốt nhanh nha 👇",
+      "Deal hết hạn là tiếc lắm đó, vào liền nha 👇",
+    ]);
+  }
+  return pickBy(deal.id + "c", [
+    "Thấy hời thì múc liền tay nha cả nhà 👇",
+    "Ưng bụng thì chốt đơn luôn nè 👇",
+    "Ai đang cần món này thì đừng bỏ lỡ nha 👇",
+  ]);
 }
 
 /** Bài Facebook fallback — tiếng Việt tự nhiên, tên sản phẩm giữ tiếng Nhật. */
@@ -81,8 +118,13 @@ function fallbackFacebook(deal, link) {
 function fallbackFriend(deal, link) {
   const pt = deal.pointRate > 0 ? `, được hoàn ${deal.pointRate}% point` : "";
   const rv = deal.reviewCount > 0 ? `Review ${deal.reviewAverage}⭐ (${deal.reviewCount} người mua) nên khá yên tâm.` : "";
-  return [
+  const opener = pickBy(deal.id + "f", [
     `Ê, món 「${shortName(deal.itemName, 34)}」 đang sale nè!`,
+    `Nè nè, 「${shortName(deal.itemName, 34)}」 đang giá hời lắm!`,
+    `Tìm thấy deal ngon nè: 「${shortName(deal.itemName, 34)}」!`,
+  ]);
+  return [
+    opener,
     `Giá ${formatPrice(deal.currentPrice)}${pt}, tính ra chỉ còn khoảng ${formatPrice(deal.effectivePrice)}${deal.savingsPercent > 0 ? ` (rẻ hơn ${deal.savingsPercent}%)` : ""}.`,
     rv,
     `Link nè: ${link}`,

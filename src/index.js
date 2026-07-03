@@ -79,11 +79,13 @@ async function buildCatalog(config, products, opts = {}) {
 
   let img = 0;
   let done = 0;
+  const viaCount = { gemini: 0, cache: 0, template: 0 };
   for (const deal of scored) {
     try {
       const isFeatured = featured.has(deal.id);
       // Content cho MỌI sản phẩm (non-featured ép template để không gọi AI hàng loạt).
       const content = await generateContent(deal, config, { forceTemplate: !isFeatured });
+      viaCount[content.via] = (viaCount[content.via] || 0) + 1;
       let image = null;
       if (isFeatured) {
         try {
@@ -93,7 +95,9 @@ async function buildCatalog(config, products, opts = {}) {
         }
         if (dedup) markAsSent(deal.id);
         img++;
-        await sleep(120);
+        // Throttle CHỈ khi vừa gọi Gemini thật (~10 req/phút free tier).
+        // Cache hit / template thì không cần chờ.
+        await sleep(content.via === "gemini" ? config.content.aiDelayMs || 5000 : 120);
       }
       await sink.sendDeal(deal, content, image);
       if (++done % 200 === 0) logger.info(`   ...đã xử lý ${done}/${scored.length}`);
@@ -103,7 +107,12 @@ async function buildCatalog(config, products, opts = {}) {
   }
 
   const result = await sink.close();
-  logger.info(`🏁 Catalog: ${scored.length} sản phẩm có bài viết, ${img} có ảnh promo. → ${result}`);
+  const quota = require("./content/quota-tracker");
+  logger.info(`🏁 Catalog: ${scored.length} sản phẩm, ${img} ảnh promo | AI mới: ${viaCount.gemini} · cache: ${viaCount.cache} · template: ${viaCount.template}`);
+  if (config.content.useAI) {
+    logger.info(`⚡ Quota Gemini hôm nay: ${quota.getTodayCount()}/${quota.getDailyLimit()} request`);
+  }
+  logger.info(`→ ${result}`);
 }
 
 async function main() {

@@ -29,10 +29,13 @@
   },
   "content": {
     "language": "vi",
-    "geminiModel": "gemini-2.0-flash",
-    "useAI": false,
+    "geminiModel": "gemini-2.5-flash",
+    "useAI": true,
     "linkMode": "raw",
-    "generateLimit": 30
+    "generateLimit": 30,
+    "aiDelayMs": 5000,
+    "dailyQuota": 250,
+    "cacheTtlDays": 7
   },
   "image": {
     "width": 1200,

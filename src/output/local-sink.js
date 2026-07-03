@@ -47,7 +47,14 @@ class LocalSink extends OutputSink {
 
   async close() {
     this.deals.sort((a, b) => (b.deal.score || 0) - (a.deal.score || 0));
-    const html = renderPage(this.deals);
+    let aiInfo = null;
+    try {
+      const { loadConfig } = require("../utils/config");
+      const quota = require("../content/quota-tracker");
+      const cfg = loadConfig();
+      if (cfg.content?.useAI) aiInfo = { used: quota.getTodayCount(), limit: quota.getDailyLimit() };
+    } catch { /* không có quota info cũng không sao */ }
+    const html = renderPage(this.deals, aiInfo);
     const indexPath = path.join(this.outputDir, "index.html");
     fs.writeFileSync(indexPath, html, "utf8");
     logger.info(`✅ Đã ghi ${this.deals.length} sản phẩm → ${indexPath}`);
@@ -75,6 +82,8 @@ function contentRow(label, icon, text, kind) {
 function renderCard({ deal, content, imageFile }) {
   const hot = (deal.score || 0) >= 85;
   const featured = Boolean(imageFile);
+  const via = content.via || "template";
+  const isAI = via === "gemini" || via === "cache";
   const img = imageFile
     ? `<img class="promo" src="${escapeHtml(imageFile)}" alt="promo" loading="lazy">`
     : deal.imageUrl
@@ -83,6 +92,7 @@ function renderCard({ deal, content, imageFile }) {
 
   // Chips sale / point / super deal.
   const chips = [];
+  if (isAI) chips.push(`<span class="chip ai">AI ✦</span>`);
   if (deal.isSuperDeal) chips.push(`<span class="chip sd">SUPER DEAL</span>`);
   if (deal.discountPercent > 0) chips.push(`<span class="chip sale">SALE −${escapeHtml(String(deal.discountPercent))}%</span>`);
   if (deal.pointRate > 0) chips.push(`<span class="chip point">ポイント +${escapeHtml(String(deal.pointRate))}% (${formatPrice(deal.pointAmount)})</span>`);
@@ -96,6 +106,8 @@ function renderCard({ deal, content, imageFile }) {
 
   return `
   <article class="card${hot ? " hot" : ""}${featured ? " featured" : ""}"
+    data-id="${escapeHtml(deal.id || "")}"
+    data-via="${escapeHtml(via)}"
     data-name="${escapeHtml(searchKey)}"
     data-genre="${escapeHtml(deal.genreName || "")}"
     data-source="${escapeHtml(deal.sourcePage || "")}"
@@ -115,13 +127,17 @@ function renderCard({ deal, content, imageFile }) {
         · <a href="${escapeHtml(deal.itemUrl || "#")}" target="_blank" rel="noopener">Rakuten ↗</a></div>
       ${contentRow("Facebook", "📘", content.facebookPost, "fb")}
       ${contentRow("tin nhắn", "💬", content.friendMessage, "msg")}
+      ${isAI ? "" : `<button class="genbtn" onclick="genAI(this)" title="Sinh bài bằng Gemini cho riêng sản phẩm này (cần chạy npm run serve)">⚡ Tạo bài AI</button>`}
     </div>
   </article>`;
 }
 
-function renderPage(deals) {
+function renderPage(deals, aiInfo = null) {
   const cards = deals.map(renderCard).join("\n");
   const when = stampForFilename();
+  const aiBadge = aiInfo
+    ? ` · ⚡ AI: <span id="aiUsage"${aiInfo.used >= aiInfo.limit * 0.8 ? ' class="warn"' : ""}>${aiInfo.used}/${aiInfo.limit}</span> hôm nay`
+    : "";
   const genres = [...new Set(deals.map((d) => d.deal.genreName).filter(Boolean))].sort();
   const genreOpts = ['<option value="all">Tất cả loại</option>']
     .concat(genres.map((g) => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`))
@@ -168,6 +184,12 @@ function renderPage(deals) {
   .chip { font-size:11px; font-weight:700; padding:3px 8px; border-radius:6px; color:#fff; }
   .chip.sale { background:var(--sale); } .chip.point { background:var(--point); color:#1a1d24; }
   .chip.sd { background:var(--sd); } .chip.time { background:#455a64; }
+  .chip.ai { background:linear-gradient(135deg,#00c6ff,#7c4dff); }
+  #aiUsage.warn { color:#ff5252; font-weight:700; }
+  .genbtn { background:transparent; color:var(--blue); border:1px dashed var(--blue);
+            border-radius:7px; padding:6px 8px; font-size:12px; cursor:pointer; margin-top:2px; }
+  .genbtn:hover { background:rgba(74,168,255,.1); }
+  .genbtn:disabled { opacity:.5; cursor:wait; }
   h2 { font-size:13.5px; line-height:1.4; margin:0; font-weight:600;
        display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
   .shop { color:var(--muted); font-size:11.5px; } .genre { color:var(--blue); }
@@ -205,7 +227,7 @@ function renderPage(deals) {
 </head>
 <body>
 <header>
-  <h1>🐰 Rakuten Hunter <small>${deals.length} sản phẩm (đều có bài viết) · ${featuredCount} có ảnh promo · ${when} JST</small></h1>
+  <h1>🐰 Rakuten Hunter <small>${deals.length} sản phẩm · ${featuredCount} deal hot có ảnh promo${aiBadge} · ${when} JST</small></h1>
   <div class="toolbar">
     <input type="search" id="q" placeholder="🔍 Tìm theo tên sản phẩm / shop...">
     <select id="genre">${genreOpts}</select>
@@ -222,7 +244,7 @@ function renderPage(deals) {
       <option value="point">Point % ↓</option>
     </select>
     <label><input type="checkbox" id="saleOnly"> Chỉ hàng giảm giá</label>
-    <label><input type="checkbox" id="featOnly"> Chỉ deal có ảnh promo</label>
+    <label><input type="checkbox" id="featOnly"> 🔥 Deal hot today</label>
     <label>Điểm ≥ <input type="range" id="minScore" min="0" max="100" step="5" value="0" style="width:90px"><span id="minScoreVal">0</span></label>
     <span id="count"></span>
   </div>
@@ -343,6 +365,53 @@ ${cards || '<p style="color:var(--muted)">Không có sản phẩm.</p>'}
   modalCloseBtn.addEventListener('click', closeModal);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+  // --- AI on-demand (cần local server: npm run serve) ---
+  function applyAI(card, e){
+    const fb = card.querySelector('pre.raw[data-kind="fb"]');
+    const msg = card.querySelector('pre.raw[data-kind="msg"]');
+    if (fb && e.facebookPost) fb.textContent = e.facebookPost;
+    if (msg && e.friendMessage) msg.textContent = e.friendMessage;
+    card.dataset.via = 'cache';
+    if (!card.querySelector('.chip.ai')) {
+      const s = document.createElement('span');
+      s.className = 'chip ai'; s.textContent = 'AI ✦';
+      card.querySelector('.chips').prepend(s);
+    }
+    const b = card.querySelector('.genbtn');
+    if (b) b.remove();
+  }
+  function refreshQuota(){
+    fetch('/api/quota').then(r => r.ok ? r.json() : null).then(q => {
+      if (!q) return;
+      const el = document.getElementById('aiUsage');
+      if (el) { el.textContent = q.used + '/' + q.limit; el.classList.toggle('warn', q.used >= q.limit * 0.8); }
+    }).catch(() => {});
+  }
+  async function genAI(btn){
+    const card = btn.closest('.card');
+    btn.disabled = true; btn.textContent = '⏳ Đang tạo bài AI...';
+    try {
+      const res = await fetch('/api/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: card.dataset.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      applyAI(card, data);
+      refreshQuota();
+    } catch (err) {
+      alert('Không tạo được bài AI: ' + err.message + String.fromCharCode(10) + '(Nút này cần mở trang qua local server: npm run serve)');
+      btn.disabled = false; btn.textContent = '⚡ Tạo bài AI';
+    }
+  }
+  window.genAI = genAI;
+  // Hydrate: nếu đang chạy qua server → nạp bài AI đã cache cho các card (bền qua refresh).
+  fetch('/api/cache').then(r => r.ok ? r.json() : null).then(cache => {
+    if (!cache) return;
+    cards.forEach(c => { const e = cache[c.dataset.id]; if (e) applyAI(c, e); });
+    refreshQuota();
+  }).catch(() => {});
 
   update();
 </script>

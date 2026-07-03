@@ -53,6 +53,17 @@ function stampForFilename(date = new Date()) {
   return s.slice(0, 16).replace(" ", "_").replace(":", "-");
 }
 
+/**
+ * Chọn 1 phần tử ổn định theo seed string (cùng seed → cùng kết quả).
+ * Dùng để đa dạng pose/câu chữ theo từng sản phẩm mà rebuild không bị xáo trộn.
+ */
+function pickBy(seed, arr) {
+  let h = 0;
+  const s = String(seed || "");
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return arr[h % arr.length];
+}
+
 /** Escape HTML để nhét text người dùng an toàn vào template. */
 function escapeHtml(str) {
   return String(str == null ? "" : str)
@@ -74,4 +85,5 @@ module.exports = {
   ensureDir,
   stampForFilename,
   escapeHtml,
+  pickBy,
 };
