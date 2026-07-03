@@ -32,6 +32,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # đủ history để rebase/push cache an toàn
 
       - name: Setup Node 22
         uses: actions/setup-node@v4
@@ -52,17 +54,18 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: node src/index.js --no-dedup --gen 40
 
+      # Không được để bước lưu cache làm gãy deploy → continue-on-error.
       - name: Commit AI content cache (nếu có thay đổi)
+        continue-on-error: true
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/content-cache.json
+          git add data/content-cache.json || true
           if git diff --cached --quiet; then
             echo "Cache không đổi — bỏ qua commit"
           else
             git commit -m "chore: update AI content cache [skip ci]"
-            git pull --rebase origin main
-            git push origin main
+            git push origin HEAD:main || echo "Push cache thất bại (bỏ qua, không ảnh hưởng deploy)"
           fi
 
       - name: Bật/cấu hình GitHub Pages
