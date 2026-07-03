@@ -1,0 +1,80 @@
+# Rakuten Hunter — scrape + build catalog + deploy lên GitHub Pages
+#
+# Lịch: 2 lần/ngày (07:00 & 19:00 JST) + nút "Run workflow" chạy tay bất cứ lúc nào.
+# Yêu cầu 1 lần duy nhất từ chủ repo:
+#   - Repo ở chế độ PUBLIC (Pages free)
+#   - Secret GEMINI_API_KEY (Settings → Secrets and variables → Actions)
+#     → thiếu secret vẫn chạy được: bài viết dùng template, không có bài AI.
+
+name: Build & Deploy Catalog
+
+on:
+  schedule:
+    - cron: "0 22 * * *" # 07:00 JST sáng hôm sau (UTC+9)
+    - cron: "0 10 * * *" # 19:00 JST
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # commit content-cache.json về repo
+  pages: write # deploy Pages
+  id-token: write # xác thực deploy Pages
+
+concurrency:
+  group: deploy-catalog
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Cài font tiếng Nhật (chữ trên banner)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk
+
+      - name: Cài dependencies
+        run: npm ci
+
+      - name: Chạy pipeline (scrape → score → content → banner)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: node src/index.js --no-dedup --gen 40
+
+      - name: Commit AI content cache (nếu có thay đổi)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/content-cache.json
+          if git diff --cached --quiet; then
+            echo "Cache không đổi — bỏ qua commit"
+          else
+            git commit -m "chore: update AI content cache [skip ci]"
+            git pull --rebase origin main
+            git push origin main
+          fi
+
+      - name: Bật/cấu hình GitHub Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload catalog làm Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: output
+
+      - name: Deploy lên GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

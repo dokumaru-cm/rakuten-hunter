@@ -8,7 +8,9 @@ const logger = require("../utils/logger");
 
 const WIDTH = 1200;
 const HEIGHT = 628;
-const FONT = "Meiryo"; // font hệ thống Windows hỗ trợ tiếng Nhật
+// Font tiếng Nhật theo nền tảng: Windows có sẵn Meiryo; Linux CI (GitHub Actions)
+// cài fonts-noto-cjk trong workflow → family "Noto Sans CJK JP".
+const FONT = process.platform === "win32" ? "Meiryo" : '"Noto Sans CJK JP"';
 const CTA_H = 84;
 const TEXT_X = 396; // mép trái vùng chữ
 const TEXT_R = 900; // mép phải vùng chữ (chừa chỗ mascot)

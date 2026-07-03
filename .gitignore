@@ -11,7 +11,8 @@ data/scraped/
 data/images/
 data/sent_deals.json
 data/gemini-usage.json
-data/content-cache.json
+# content-cache.json KHÔNG ignore (hướng A): commit về repo để local + CI
+# dùng chung bài AI đã sinh → không tốn quota trùng lặp giữa các lần chạy.
 
 # Misc
 *.log
