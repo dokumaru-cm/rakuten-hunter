@@ -41,19 +41,42 @@ function parseArgs(argv) {
 }
 
 async function runPipeline(config, opts = {}) {
-  // 1. Scrape
+  const snapshotPath = path.join(config.paths.data, "snapshot.json");
+
+  // 1. Scrape (best-effort: IP trung tâm dữ liệu có thể bị Rakuten chặn).
   logger.info("🕷️  [1/4] Scrape...");
-  const products = await scrapeAll(config.scraping, { sources: opts.sources, keywords: opts.keywords });
-  if (products.length === 0) {
-    logger.warn("Không scrape được sản phẩm nào. Dừng.");
-    return;
-  }
-  // Lưu snapshot để rebuild catalog sau này không cần scrape lại.
+  let products = [];
   try {
-    const dir = ensureDir(path.join(config.paths.data, "scraped"));
-    fs.writeFileSync(path.join(dir, `${stampForFilename()}.json`), JSON.stringify(products, null, 2), "utf8");
+    products = await scrapeAll(config.scraping, { sources: opts.sources, keywords: opts.keywords });
   } catch (e) {
-    logger.warn(`Không lưu được snapshot: ${e.message}`);
+    logger.warn(`Scrape lỗi: ${e.message}`);
+  }
+
+  if (products.length > 0) {
+    // Scrape thành công → cập nhật snapshot (nguồn build dùng chung, commit vào repo).
+    try {
+      fs.writeFileSync(snapshotPath, JSON.stringify(products, null, 2), "utf8");
+      const dir = ensureDir(path.join(config.paths.data, "scraped"));
+      fs.writeFileSync(path.join(dir, `${stampForFilename()}.json`), JSON.stringify(products, null, 2), "utf8");
+    } catch (e) {
+      logger.warn(`Không lưu được snapshot: ${e.message}`);
+    }
+  } else {
+    // Scrape 0 sản phẩm (thường do bị chặn IP trên CI) → fallback snapshot đã commit.
+    logger.warn("Scrape 0 sản phẩm — thử dùng snapshot đã lưu (data/snapshot.json)...");
+    if (fs.existsSync(snapshotPath)) {
+      try {
+        products = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
+        logger.info(`📦 Dùng snapshot: ${products.length} sản phẩm (dữ liệu build lần trước)`);
+      } catch (e) {
+        logger.error(`Snapshot hỏng: ${e.message}`);
+      }
+    }
+  }
+
+  if (products.length === 0) {
+    logger.warn("Không có dữ liệu (scrape lẫn snapshot đều trống). Dừng.");
+    return;
   }
   return buildCatalog(config, products, opts);
 }
